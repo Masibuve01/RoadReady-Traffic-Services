@@ -1,28 +1,86 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { Car, CheckCircle2, Clock3, FileCheck2, LayoutDashboard, LogOut, Menu, MessageCircle, ShieldCheck, Ticket, Users, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  Bell,
+  Car,
+  ClipboardList,
+  Clock3,
+  FileCheck2,
+  FileText,
+  HelpCircle,
+  LayoutDashboard,
+  Lock,
+  LogOut,
+  Menu,
+  ShieldCheck,
+  Ticket,
+  User,
+  Users,
+  Wrench,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { supabase } from "@/integrations/supabase/client";
+import { DataTable, ErrorState, LoadingState, Panel, SectionHeader, StatusBadge } from "@/components/dashboard/primitives";
+import {
+  ApplicationsSection,
+  CitizenOverview,
+  DocumentsSection,
+  FinesSection,
+  HelpSection,
+  NotificationsSection,
+  ProfileSection,
+  SecuritySection,
+  ServicesSection,
+  VehiclesSection,
+} from "@/components/dashboard/citizen";
+import { TrafficAssistant } from "@/components/dashboard/traffic-assistant";
+import { deriveNotices, formatDate, maskIdentifier, serviceLabel, type Booking, type Fine, type Profile, type Vehicle } from "@/lib/dashboard-utils";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({ meta: [
-    { title: "Dashboard | RoadReady" },
-    { name: "description", content: "Manage RoadReady licence bookings, vehicles, fines and approvals." },
-    { property: "og:title", content: "RoadReady Dashboard" },
-    { property: "og:description", content: "Your secure traffic services dashboard." },
+    { title: "Dashboard | RoadReady Traffic Services" },
+    { name: "description", content: "Manage licence bookings, vehicles, applications and traffic fines from one secure citizen portal." },
+    { property: "og:title", content: "RoadReady Secure Traffic Services Dashboard" },
+    { property: "og:description", content: "Book tests, register vehicles, track applications and settle fines securely." },
     { property: "og:type", content: "website" },
     { name: "twitter:card", content: "summary" },
   ]}),
   component: Dashboard,
 });
 
-type Profile = { id: string; email: string; full_name: string; learners_number: string | null; drivers_number: string | null };
-type Booking = { id: string; user_id: string; booking_type: "learners" | "drivers"; preferred_date: string; traffic_department: string; status: string };
-type Vehicle = { id: string; number_plate: string; make: string; model: string; registration_status: string };
-type Fine = { id: string; reference_number: string; offence: string; amount: number; due_date: string; payment_status: string };
+type NavItem = { id: string; label: string; icon: typeof LayoutDashboard };
+type NavGroup = { heading: string; items: NavItem[] };
+
+const citizenNav: NavGroup[] = [
+  { heading: "Services", items: [
+    { id: "overview", label: "Overview", icon: LayoutDashboard },
+    { id: "services", label: "Traffic services", icon: Wrench },
+    { id: "vehicles", label: "My vehicles", icon: Car },
+    { id: "applications", label: "Applications", icon: ClipboardList },
+    { id: "fines", label: "Fines", icon: Ticket },
+    { id: "documents", label: "Documents", icon: FileText },
+    { id: "notifications", label: "Notifications", icon: Bell },
+    { id: "help", label: "Help & support", icon: HelpCircle },
+  ]},
+  { heading: "Account", items: [
+    { id: "profile", label: "Profile", icon: User },
+    { id: "security", label: "Security", icon: ShieldCheck },
+  ]},
+];
+
+const adminNav: NavGroup[] = [
+  { heading: "Administration", items: [
+    { id: "overview", label: "Overview", icon: LayoutDashboard },
+    { id: "users", label: "All users", icon: Users },
+    { id: "approvals", label: "Approvals", icon: FileCheck2 },
+    { id: "admin-vehicles", label: "Vehicles", icon: Car },
+  ]},
+  { heading: "Account", items: [{ id: "security", label: "Security", icon: ShieldCheck }] },
+];
 
 function Dashboard() {
   const navigate = useNavigate();
@@ -34,77 +92,371 @@ function Dashboard() {
   const [users, setUsers] = useState<Profile[]>([]);
   const [isAdmin, setIsAdmin] = useState(false);
   const [section, setSection] = useState("overview");
-  const [chatOpen, setChatOpen] = useState(false);
-  const [plateAnswer, setPlateAnswer] = useState("");
+  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [readIds, setReadIds] = useState<string[]>([]);
 
-  async function loadData() {
-    const [{ data: p }, { data: roles }] = await Promise.all([
-      supabase.from("profiles").select("id,email,full_name,learners_number,drivers_number").eq("id", user.id).maybeSingle(),
-      supabase.from("user_roles").select("role").eq("user_id", user.id),
-    ]);
-    const admin = roles?.some((role) => role.role === "admin") ?? false;
-    setProfile(p); setIsAdmin(admin);
-    const [bookingResult, vehicleResult, fineResult, usersResult] = await Promise.all([
-      supabase.from("bookings").select("id,user_id,booking_type,preferred_date,traffic_department,status").order("created_at", { ascending: false }),
-      supabase.from("vehicles").select("id,number_plate,make,model,registration_status").order("created_at", { ascending: false }),
-      supabase.from("fines").select("id,reference_number,offence,amount,due_date,payment_status").order("created_at", { ascending: false }),
-      admin ? supabase.from("profiles").select("id,email,full_name,learners_number,drivers_number").order("created_at", { ascending: false }) : Promise.resolve({ data: [] }),
-    ]);
-    setBookings(bookingResult.data ?? []); setVehicles(vehicleResult.data ?? []); setFines(fineResult.data ?? []); setUsers(usersResult.data ?? []);
+  const storageKey = `roadready:read-notices:${user.id}`;
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(storageKey);
+      if (stored) setReadIds(JSON.parse(stored) as string[]);
+    } catch { /* ignore unreadable storage */ }
+  }, [storageKey]);
+
+  function persistRead(ids: string[]) {
+    setReadIds(ids);
+    try { window.localStorage.setItem(storageKey, JSON.stringify(ids)); } catch { /* ignore */ }
   }
 
-  useEffect(() => { void loadData(); }, []);
+  const loadData = useCallback(async () => {
+    setStatus("loading");
+    try {
+      const [{ data: p, error: profileError }, { data: roles, error: roleError }] = await Promise.all([
+        supabase.from("profiles").select("id,email,full_name,id_number,phone,learners_number,learners_expiry,drivers_number,drivers_expiry").eq("id", user.id).maybeSingle(),
+        supabase.from("user_roles").select("role").eq("user_id", user.id),
+      ]);
+      if (profileError || roleError) throw profileError ?? roleError;
+      const admin = roles?.some((role) => role.role === "admin") ?? false;
+      setProfile(p as Profile | null);
+      setIsAdmin(admin);
+
+      const [bookingResult, vehicleResult, fineResult, usersResult] = await Promise.all([
+        supabase.from("bookings").select("id,user_id,booking_type,preferred_date,traffic_department,status,appointment_date,created_at,updated_at").order("created_at", { ascending: false }),
+        supabase.from("vehicles").select("id,number_plate,make,model,manufacture_year,color,registration_status,created_at,updated_at").order("created_at", { ascending: false }),
+        supabase.from("fines").select("id,reference_number,offence,offence_date,location,amount,due_date,payment_status,created_at").order("created_at", { ascending: false }),
+        admin
+          ? supabase.from("profiles").select("id,email,full_name,id_number,phone,learners_number,learners_expiry,drivers_number,drivers_expiry").order("created_at", { ascending: false })
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+      if (bookingResult.error || vehicleResult.error || fineResult.error || usersResult.error) {
+        throw bookingResult.error ?? vehicleResult.error ?? fineResult.error ?? usersResult.error;
+      }
+      setBookings((bookingResult.data ?? []) as Booking[]);
+      setVehicles((vehicleResult.data ?? []) as Vehicle[]);
+      setFines((fineResult.data ?? []) as Fine[]);
+      setUsers((usersResult.data ?? []) as Profile[]);
+      setStatus("ready");
+    } catch {
+      setStatus("error");
+    }
+  }, [user.id]);
+
+  useEffect(() => { void loadData(); }, [loadData]);
+
+  const notices = useMemo(() => deriveNotices(bookings, fines, vehicles), [bookings, fines, vehicles]);
+  const unread = notices.filter((notice) => !readIds.includes(notice.id)).length;
 
   async function book(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); const data = new FormData(event.currentTarget);
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = new FormData(form);
     const type = String(data.get("type")) as "learners" | "drivers";
-    if (type === "drivers" && !profile?.learners_number) { toast.error("A learner's licence must be recorded before booking a driver test."); return; }
+    if (type === "drivers" && !profile?.learners_number) {
+      toast.error("A learner's licence must be recorded before booking a driver test.");
+      return;
+    }
     const { error } = await supabase.from("bookings").insert({ user_id: user.id, booking_type: type, preferred_date: String(data.get("date")), traffic_department: String(data.get("department")) });
-    if (error) toast.error(error.message); else { toast.success("Booking submitted for approval"); event.currentTarget.reset(); await loadData(); }
+    if (error) toast.error(error.message);
+    else { toast.success("Booking submitted for approval"); form.reset(); await loadData(); setSection("applications"); }
   }
 
   async function registerVehicle(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); const data = new FormData(event.currentTarget);
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = new FormData(form);
     const { error } = await supabase.from("vehicles").insert({ user_id: user.id, number_plate: String(data.get("plate")).toUpperCase(), make: String(data.get("make")), model: String(data.get("model")) });
-    if (error) toast.error(error.message); else { toast.success("Vehicle submitted for verification"); event.currentTarget.reset(); await loadData(); }
+    if (error) toast.error(error.message);
+    else { toast.success("Vehicle submitted for verification"); form.reset(); await loadData(); }
   }
 
-  async function updateBooking(id: string, status: "approved" | "rejected" | "passed" | "failed") {
-    const { error } = await supabase.from("bookings").update({ status }).eq("id", id);
-    if (error) toast.error(error.message); else { toast.success(`Booking marked ${status}`); await loadData(); }
+  async function cancelBooking(id: string) {
+    const { error } = await supabase.from("bookings").update({ status: "cancelled" }).eq("id", id);
+    if (error) toast.error(error.message);
+    else { toast.success("Application cancelled"); await loadData(); }
   }
 
-  async function signOut() {
-    await supabase.auth.signOut(); await navigate({ to: "/auth", search: { mode: "login" }, replace: true });
+  async function payFine(fine: Fine) {
+    const { error } = await supabase.from("payments").insert({ user_id: user.id, fine_id: fine.id, amount: fine.amount });
+    if (error) toast.error(error.message);
+    else toast.success(`Payment of R ${Number(fine.amount).toFixed(2)} recorded as pending with the secure traffic services channel.`);
   }
 
-  const nav: Array<[string, typeof LayoutDashboard, string]> = isAdmin ? [["overview", LayoutDashboard, "Overview"], ["users", Users, "All users"], ["approvals", FileCheck2, "Approvals"]] : [["overview", LayoutDashboard, "Overview"], ["book", CheckCircle2, "Book a test"], ["vehicles", Car, "My vehicles"], ["fines", Ticket, "Fines"]];
-  return (
-    <main className="min-h-screen bg-muted/40 lg:grid lg:grid-cols-[250px_1fr]">
-      <aside className="border-b border-border bg-road text-primary-foreground lg:min-h-screen lg:border-b-0 lg:border-r">
-        <div className="flex h-20 items-center gap-3 border-b border-primary-foreground/15 px-5"><ShieldCheck className="text-warning" /><strong className="text-lg">RoadReady</strong></div>
-        <nav className="flex gap-1 overflow-x-auto p-3 lg:grid lg:p-4">{nav.map(([id, Icon, label]) => <Button key={id} variant="ghost" onClick={() => setSection(id)} className={`justify-start text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground ${section === id ? "bg-primary-foreground/15" : ""}`}><Icon />{label}</Button>)}</nav>
-      </aside>
-      <div>
-        <header className="flex h-20 items-center justify-between border-b border-border bg-background px-5 lg:px-8"><div><p className="text-xs font-bold uppercase text-primary">{isAdmin ? "Administration" : "Citizen services"}</p><h1 className="font-bold">{profile?.full_name ?? user.email}</h1></div><Button variant="outline" onClick={signOut}><LogOut /> Sign out</Button></header>
-        <div className="mx-auto max-w-7xl p-5 lg:p-8">
-          {section === "overview" && <Overview isAdmin={isAdmin} users={users} bookings={bookings} vehicles={vehicles} fines={fines} />}
-          {section === "book" && !isAdmin && <section><PageTitle title="Book a licence test" subtitle="Your request will be reviewed by a traffic administrator." /><form onSubmit={book} className="app-card mt-6 grid max-w-2xl gap-5"><Select name="type" required><SelectTrigger><SelectValue placeholder="Choose test type" /></SelectTrigger><SelectContent><SelectItem value="learners">Learner's licence</SelectItem><SelectItem value="drivers">Driver's licence</SelectItem></SelectContent></Select><Input name="date" type="date" required /><Input name="department" placeholder="Preferred traffic department" required /><Button>Submit booking</Button></form></section>}
-          {section === "vehicles" && !isAdmin && <section><PageTitle title="My vehicles" subtitle="Register a car and track its verification status." /><form onSubmit={registerVehicle} className="app-card my-6 grid gap-4 md:grid-cols-4"><Input name="plate" placeholder="Number plate" required /><Input name="make" placeholder="Make" required /><Input name="model" placeholder="Model" required /><Button>Register vehicle</Button></form><DataTable headers={["Number plate", "Vehicle", "Status"]} rows={vehicles.map(v => [v.number_plate, `${v.make} ${v.model}`, <Status value={v.registration_status} />])} /></section>}
-          {section === "fines" && !isAdmin && <section><PageTitle title="Traffic fines" subtitle="Review amounts and payment status." /><div className="mt-6"><DataTable headers={["Reference", "Offence", "Due", "Amount", "Status"]} rows={fines.map(f => [f.reference_number, f.offence, f.due_date, `R ${Number(f.amount).toFixed(2)}`, <Status value={f.payment_status} />])} /></div></section>}
-          {section === "users" && isAdmin && <section><PageTitle title="All registered users" subtitle="Every citizen account in the system." /><div className="mt-6"><DataTable headers={["Full name", "Email", "Learner licence", "Driver licence"]} rows={users.map(u => [u.full_name, u.email, u.learners_number ?? "Not recorded", u.drivers_number ?? "Not recorded"])} /></div></section>}
-          {section === "approvals" && isAdmin && <section><PageTitle title="Booking approvals" subtitle="Review requests and record outcomes." /><div className="mt-6"><DataTable headers={["Applicant", "Type", "Department", "Preferred date", "Status", "Actions"]} rows={bookings.map(b => [users.find(u => u.id === b.user_id)?.full_name ?? "User", b.booking_type, b.traffic_department, b.preferred_date, <Status value={b.status} />, <div className="flex flex-wrap gap-1"><Button size="sm" onClick={() => updateBooking(b.id,"approved")}>Approve</Button><Button size="sm" variant="outline" onClick={() => updateBooking(b.id,"rejected")}>Reject</Button><Button size="sm" variant="secondary" onClick={() => updateBooking(b.id,"passed")}>Pass</Button></div>])} /></div></section>}
+  async function updateBooking(id: string, next: "approved" | "rejected" | "passed" | "failed") {
+    const { error } = await supabase.from("bookings").update({ status: next }).eq("id", id);
+    if (error) toast.error(error.message);
+    else { toast.success(`Booking marked ${next}`); await loadData(); }
+  }
+
+  async function resetPassword() {
+    const { error } = await supabase.auth.resetPasswordForEmail(user.email ?? "", { redirectTo: `${window.location.origin}/auth` });
+    if (error) toast.error(error.message);
+    else toast.success("Password reset link sent to your email address.");
+  }
+
+  async function signOut(scope: "local" | "global" = "local") {
+    await supabase.auth.signOut(scope === "global" ? { scope: "global" } : undefined);
+    await navigate({ to: "/auth", search: { mode: "login" }, replace: true });
+  }
+
+  const groups = isAdmin ? adminNav : citizenNav;
+  const displayName = profile?.full_name ?? user.email ?? "Citizen";
+
+  function go(target: string) {
+    setSection(target);
+    setMenuOpen(false);
+    if (typeof window !== "undefined") window.scrollTo({ top: 0 });
+  }
+
+  const navContent = (
+    <nav aria-label="Dashboard sections" className="grid gap-6 p-4">
+      {groups.map((group) => (
+        <div key={group.heading}>
+          <p className="px-3 pb-2 text-[11px] font-bold uppercase tracking-wider text-primary-foreground/50">{group.heading}</p>
+          <ul className="grid gap-1">
+            {group.items.map(({ id, label, icon: Icon }) => (
+              <li key={id}>
+                <button
+                  type="button"
+                  onClick={() => go(id)}
+                  aria-current={section === id ? "page" : undefined}
+                  className={cn(
+                    "flex min-h-11 w-full items-center gap-3 rounded-md px-3 text-sm font-medium text-primary-foreground/80 transition-colors hover:bg-primary-foreground/10 hover:text-primary-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-warning",
+                    section === id && "bg-primary-foreground/15 text-primary-foreground",
+                  )}
+                >
+                  <Icon aria-hidden="true" className="size-4 shrink-0" />
+                  <span className="truncate">{label}</span>
+                  {id === "notifications" && unread ? <span className="ml-auto rounded-full bg-warning px-2 py-0.5 text-[10px] font-bold text-road">{unread}</span> : null}
+                </button>
+              </li>
+            ))}
+          </ul>
         </div>
+      ))}
+      <Button variant="ghost" onClick={() => void signOut()} className="justify-start text-primary-foreground/80 hover:bg-primary-foreground/10 hover:text-primary-foreground">
+        <LogOut aria-hidden="true" /> Sign out
+      </Button>
+    </nav>
+  );
+
+  return (
+    <div className="min-h-dvh bg-muted/40 lg:grid lg:grid-cols-[260px_1fr]">
+      <a href="#dashboard-main" className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-card focus:px-4 focus:py-2">Skip to main content</a>
+
+      {/* Desktop sidebar */}
+      <aside className="hidden bg-road text-primary-foreground lg:block lg:min-h-dvh lg:border-r lg:border-primary-foreground/10">
+        <div className="sticky top-0">
+          <div className="flex h-16 items-center gap-2 border-b border-primary-foreground/15 px-5">
+            <ShieldCheck aria-hidden="true" className="size-5 text-warning" />
+            <span className="text-base font-bold">RoadReady</span>
+          </div>
+          {navContent}
+        </div>
+      </aside>
+
+      <div className="min-w-0">
+        <header className="sticky top-0 z-20 border-b border-border bg-background">
+          <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 lg:px-8">
+            <Button variant="ghost" size="icon" className="min-h-11 min-w-11 lg:hidden" aria-label="Open navigation menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(true)}>
+              <Menu aria-hidden="true" />
+            </Button>
+            <div className="min-w-0">
+              <h1 className="truncate text-base font-bold sm:text-lg">Welcome back, {displayName}</h1>
+              <p className="hidden truncate text-sm text-muted-foreground sm:block">
+                {isAdmin ? "Monitor citizen activity and process traffic service requests." : "Manage your traffic services, vehicles, applications and fines from one secure portal."}
+              </p>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="mr-1 hidden items-center gap-1.5 rounded-full border border-success/40 bg-success/10 px-2.5 py-1 text-xs font-semibold text-success md:inline-flex">
+                <Lock aria-hidden="true" className="size-3" /> Secure session
+              </span>
+              <Button variant="ghost" size="icon" className="relative min-h-11 min-w-11" onClick={() => go("notifications")} aria-label={`Notifications${unread ? `, ${unread} unread` : ""}`}>
+                <Bell aria-hidden="true" />
+                {unread ? <span className="absolute right-1.5 top-1.5 min-w-4 rounded-full bg-destructive px-1 text-[10px] font-bold leading-4 text-destructive-foreground">{unread}</span> : null}
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="icon" className="min-h-11 min-w-11" aria-label="Account menu"><User aria-hidden="true" /></Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-60">
+                  <DropdownMenuLabel>
+                    <span className="block truncate">{displayName}</span>
+                    <span className="block truncate text-xs font-normal text-muted-foreground">{user.email}</span>
+                    <span className="mt-1 block text-xs font-normal text-muted-foreground">ID {maskIdentifier(profile?.id_number)}</span>
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {!isAdmin ? <DropdownMenuItem onSelect={() => go("profile")}>My profile</DropdownMenuItem> : null}
+                  <DropdownMenuItem onSelect={() => go("security")}>Account &amp; security</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => go("notifications")}>Notification preferences</DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => void signOut()}>Sign out</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+        </header>
+
+        {/* Mobile drawer */}
+        {menuOpen ? (
+          <div className="fixed inset-0 z-40 lg:hidden">
+            <button type="button" aria-label="Close navigation menu" className="absolute inset-0 bg-foreground/50" onClick={() => setMenuOpen(false)} />
+            <div role="dialog" aria-label="Dashboard navigation" className="absolute inset-y-0 left-0 w-72 overflow-y-auto bg-road text-primary-foreground shadow-xl">
+              <div className="flex h-16 items-center justify-between border-b border-primary-foreground/15 px-4">
+                <span className="flex items-center gap-2 font-bold"><ShieldCheck aria-hidden="true" className="size-5 text-warning" /> RoadReady</span>
+                <Button variant="ghost" size="icon" className="min-h-11 min-w-11 text-primary-foreground hover:bg-primary-foreground/10" aria-label="Close navigation menu" onClick={() => setMenuOpen(false)}><X aria-hidden="true" /></Button>
+              </div>
+              {navContent}
+            </div>
+          </div>
+        ) : null}
+
+        <main id="dashboard-main" className="mx-auto max-w-7xl p-4 pb-28 sm:p-6 lg:p-8">
+          {status === "loading" ? <LoadingState /> : null}
+          {status === "error" ? <ErrorState message="We couldn't load your traffic services. Please check your connection and try again." onRetry={() => void loadData()} /> : null}
+          {status === "ready" ? (
+            isAdmin ? (
+              <AdminViews section={section} users={users} bookings={bookings} vehicles={vehicles} fines={fines} onUpdate={updateBooking} email={user.email ?? ""} onPasswordReset={resetPassword} onSignOutEverywhere={() => void signOut("global")} />
+            ) : (
+              <>
+                {section === "overview" && <CitizenOverview profile={profile} bookings={bookings} vehicles={vehicles} fines={fines} notices={notices} readIds={readIds} onNavigate={go} />}
+                {section === "services" && <ServicesSection profile={profile} onBook={book} onNavigate={go} />}
+                {section === "vehicles" && <VehiclesSection vehicles={vehicles} onRegister={registerVehicle} onNavigate={go} />}
+                {section === "applications" && <ApplicationsSection bookings={bookings} onNavigate={go} onCancel={(id) => void cancelBooking(id)} />}
+                {section === "fines" && <FinesSection fines={fines} onPay={(fine) => void payFine(fine)} />}
+                {section === "documents" && <DocumentsSection bookings={bookings} vehicles={vehicles} />}
+                {section === "notifications" && (
+                  <NotificationsSection
+                    notices={notices}
+                    readIds={readIds}
+                    onRead={(id) => persistRead(Array.from(new Set([...readIds, id])))}
+                    onReadAll={() => persistRead(notices.map((notice) => notice.id))}
+                    onNavigate={go}
+                  />
+                )}
+                {section === "help" && <HelpSection onNavigate={go} />}
+                {section === "profile" && <ProfileSection profile={profile} />}
+                {section === "security" && <SecuritySection email={user.email ?? ""} onPasswordReset={() => void resetPassword()} onSignOutEverywhere={() => void signOut("global")} />}
+              </>
+            )
+          ) : null}
+        </main>
       </div>
-      {!isAdmin && <><Button size="icon" className="fixed bottom-6 right-6 size-12 rounded-full" onClick={() => setChatOpen(!chatOpen)} aria-label="Open vehicle assistant">{chatOpen ? <X /> : <MessageCircle />}</Button>{chatOpen && <div className="app-card fixed bottom-24 right-5 z-20 w-[calc(100%-2.5rem)] max-w-sm shadow-xl"><h2 className="font-bold">Vehicle assistant</h2><p className="mt-1 text-sm text-muted-foreground">Ask for the number plate linked to your account.</p><Button className="mt-4 w-full" variant="outline" onClick={() => setPlateAnswer(vehicles.length ? vehicles.map(v => v.number_plate).join(", ") : "No vehicle is registered yet.")}>Show my number plate</Button>{plateAnswer && <p className="mt-3 rounded-md bg-muted p-3 text-sm font-semibold">{plateAnswer}</p>}</div>}</>}
-    </main>
+
+      {!isAdmin && status === "ready" ? <TrafficAssistant bookings={bookings} vehicles={vehicles} fines={fines} onNavigate={go} /> : null}
+    </div>
   );
 }
 
-function Overview({ isAdmin, users, bookings, vehicles, fines }: { isAdmin: boolean; users: Profile[]; bookings: Booking[]; vehicles: Vehicle[]; fines: Fine[] }) {
-  const stats = isAdmin ? [["Registered users", users.length, Users], ["Pending approvals", bookings.filter(b => b.status === "pending").length, Clock3], ["Registered vehicles", vehicles.length, Car]] : [["Applications", bookings.length, FileCheck2], ["My vehicles", vehicles.length, Car], ["Unpaid fines", fines.filter(f => f.payment_status !== "paid").length, Ticket]];
-  return <section><PageTitle title={isAdmin ? "System overview" : "Your dashboard"} subtitle={isAdmin ? "Monitor activity and process citizen requests." : "A clear view of your traffic services."} /><div className="mt-6 grid gap-4 md:grid-cols-3">{stats.map(([label,value,Icon]) => { const I = Icon as typeof Users; return <article className="app-card" key={String(label)}><I className="text-primary" /><p className="mt-5 text-sm text-muted-foreground">{String(label)}</p><p className="mt-1 text-4xl font-black">{String(value)}</p></article>; })}</div><div className="mt-7"><h2 className="mb-3 text-lg font-bold">Recent applications</h2><DataTable headers={["Type", "Department", "Date", "Status"]} rows={bookings.slice(0,5).map(b => [b.booking_type, b.traffic_department, b.preferred_date, <Status value={b.status} />])} /></div></section>;
+function AdminViews({
+  section,
+  users,
+  bookings,
+  vehicles,
+  fines,
+  onUpdate,
+  email,
+  onPasswordReset,
+  onSignOutEverywhere,
+}: {
+  section: string;
+  users: Profile[];
+  bookings: Booking[];
+  vehicles: Vehicle[];
+  fines: Fine[];
+  onUpdate: (id: string, status: "approved" | "rejected" | "passed" | "failed") => void;
+  email: string;
+  onPasswordReset: () => void;
+  onSignOutEverywhere: () => void;
+}) {
+  const pending = bookings.filter((booking) => booking.status === "pending");
+  if (section === "security") return <SecuritySection email={email} onPasswordReset={onPasswordReset} onSignOutEverywhere={onSignOutEverywhere} />;
+
+  if (section === "users") {
+    return (
+      <div className="space-y-6">
+        <SectionHeader title="All registered users" description="Every citizen account in the system. Identity numbers are masked." />
+        <DataTable
+          caption="Registered users"
+          headers={["Full name", "Email", "Identity number", "Learner licence", "Driver licence"]}
+          rows={users.map((person) => [person.full_name, person.email, maskIdentifier(person.id_number), person.learners_number ?? "Not recorded", person.drivers_number ?? "Not recorded"])}
+        />
+      </div>
+    );
+  }
+
+  if (section === "approvals") {
+    return (
+      <div className="space-y-6">
+        <SectionHeader title="Booking approvals" description="Review citizen requests and record outcomes." />
+        <DataTable
+          caption="Booking approvals"
+          headers={["Applicant", "Service", "Department", "Preferred date", "Status", "Actions"]}
+          rows={bookings.map((booking) => [
+            users.find((person) => person.id === booking.user_id)?.full_name ?? "Citizen",
+            serviceLabel[booking.booking_type] ?? booking.booking_type,
+            booking.traffic_department,
+            formatDate(booking.preferred_date),
+            <StatusBadge key={`${booking.id}-status`} value={booking.status} />,
+            <div key={`${booking.id}-actions`} className="flex flex-wrap gap-1">
+              <Button size="sm" onClick={() => onUpdate(booking.id, "approved")}>Approve</Button>
+              <Button size="sm" variant="outline" onClick={() => onUpdate(booking.id, "rejected")}>Reject</Button>
+              <Button size="sm" variant="secondary" onClick={() => onUpdate(booking.id, "passed")}>Pass</Button>
+              <Button size="sm" variant="ghost" onClick={() => onUpdate(booking.id, "failed")}>Fail</Button>
+            </div>,
+          ])}
+        />
+      </div>
+    );
+  }
+
+  if (section === "admin-vehicles") {
+    return (
+      <div className="space-y-6">
+        <SectionHeader title="Registered vehicles" description="Vehicles submitted by citizens and their verification status." />
+        <DataTable
+          caption="Registered vehicles"
+          headers={["Number plate", "Vehicle", "Registered", "Status"]}
+          rows={vehicles.map((vehicle) => [vehicle.number_plate, `${vehicle.make} ${vehicle.model}`, formatDate(vehicle.created_at), <StatusBadge key={vehicle.id} value={vehicle.registration_status} />])}
+        />
+      </div>
+    );
+  }
+
+  const stats = [
+    { label: "Registered users", value: users.length, icon: Users },
+    { label: "Pending approvals", value: pending.length, icon: Clock3 },
+    { label: "Registered vehicles", value: vehicles.length, icon: Car },
+    { label: "Unpaid fines", value: fines.filter((fine) => fine.payment_status === "unpaid").length, icon: Ticket },
+  ];
+
+  return (
+    <div className="space-y-8">
+      <SectionHeader title="System overview" description="Monitor activity and process citizen requests." />
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {stats.map(({ label, value, icon: Icon }) => (
+          <Panel key={label}>
+            <Icon aria-hidden="true" className="size-5 text-primary" />
+            <p className="mt-6 text-sm text-muted-foreground">{label}</p>
+            <p className="mt-1 text-3xl font-black tabular-nums">{value}</p>
+          </Panel>
+        ))}
+      </div>
+      <section>
+        <h2 className="mb-3 text-lg font-bold">Latest applications</h2>
+        <DataTable
+          caption="Latest applications"
+          headers={["Applicant", "Service", "Department", "Preferred date", "Status"]}
+          rows={bookings.slice(0, 8).map((booking) => [
+            users.find((person) => person.id === booking.user_id)?.full_name ?? "Citizen",
+            serviceLabel[booking.booking_type] ?? booking.booking_type,
+            booking.traffic_department,
+            formatDate(booking.preferred_date),
+            <StatusBadge key={booking.id} value={booking.status} />,
+          ])}
+        />
+      </section>
+    </div>
+  );
 }
-function PageTitle({ title, subtitle }: { title: string; subtitle: string }) { return <div><h2 className="text-3xl font-black">{title}</h2><p className="mt-1 text-muted-foreground">{subtitle}</p></div>; }
-function Status({ value }: { value: string }) { return <span className="status-pill">{value}</span>; }
-function DataTable({ headers, rows }: { headers: string[]; rows: (string | ReactNode)[][] }) { return <div className="overflow-x-auto border border-border bg-card"><table className="w-full min-w-[650px] text-left text-sm"><thead className="bg-road text-primary-foreground"><tr>{headers.map(h => <th key={h} className="px-4 py-3">{h}</th>)}</tr></thead><tbody>{rows.length ? rows.map((row,i) => <tr key={i} className="border-t border-border">{row.map((cell,j) => <td key={j} className="px-4 py-3">{cell}</td>)}</tr>) : <tr><td colSpan={headers.length} className="px-4 py-10 text-center text-muted-foreground">No records yet</td></tr>}</tbody></table></div>; }
