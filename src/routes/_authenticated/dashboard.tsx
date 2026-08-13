@@ -133,6 +133,7 @@ function Dashboard() {
   const [section, setSection] = useState("overview");
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [openGroups, setOpenGroups] = useState<string[]>([]);
   const [readIds, setReadIds] = useState<string[]>([]);
 
   const storageKey = `roadready:read-notices:${user.id}`;
