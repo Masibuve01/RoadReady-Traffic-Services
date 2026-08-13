@@ -18,24 +18,31 @@ export type Booking = {
   traffic_department: string;
   status: string;
   appointment_date: string | null;
+  admin_notes?: string | null;
   created_at: string;
   updated_at: string;
 };
 
 export type Vehicle = {
   id: string;
+  user_id?: string;
   number_plate: string;
+  vin?: string | null;
   make: string;
   model: string;
   manufacture_year: number | null;
   color: string | null;
   registration_status: string;
+  admin_notes?: string | null;
+  document_reference?: string | null;
   created_at: string;
   updated_at: string;
 };
 
 export type Fine = {
   id: string;
+  user_id?: string;
+  vehicle_id?: string | null;
   reference_number: string;
   offence: string;
   offence_date: string;
