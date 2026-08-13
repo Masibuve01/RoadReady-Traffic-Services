@@ -39,7 +39,16 @@ import {
 } from "@/components/dashboard/citizen";
 import { TrafficAssistant } from "@/components/dashboard/traffic-assistant";
 import { deriveNotices, formatDate, maskIdentifier, serviceLabel, type Booking, type Fine, type Profile, type Vehicle } from "@/lib/dashboard-utils";
+import { AdminAppointments, AdminApplications, AdminCitizens, AdminDocuments, AdminFines, AdminOverview, AdminSearch, AdminSecurity, AdminSettings, AdminVehicles } from "@/components/dashboard/admin";
+import type { AdminRole } from "@/lib/admin-utils";
 import { cn } from "@/lib/utils";
+
+function greeting() {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  return "Good evening";
+}
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({ meta: [
