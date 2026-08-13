@@ -52,7 +52,7 @@ export const Route = createFileRoute("/_authenticated/dashboard")({
   component: Dashboard,
 });
 
-type NavItem = { id: string; label: string; icon: typeof LayoutDashboard };
+type NavItem = { id: string; label: string; icon: typeof LayoutDashboard; children?: { id: string; label: string }[] };
 type NavGroup = { heading: string; items: NavItem[] };
 
 const citizenNav: NavGroup[] = [
@@ -75,12 +75,51 @@ const citizenNav: NavGroup[] = [
 const adminNav: NavGroup[] = [
   { heading: "Administration", items: [
     { id: "overview", label: "Overview", icon: LayoutDashboard },
-    { id: "users", label: "All users", icon: Users },
-    { id: "approvals", label: "Approvals", icon: FileCheck2 },
-    { id: "admin-vehicles", label: "Vehicles", icon: Car },
+    { id: "applications:all", label: "Applications", icon: ClipboardList, children: [
+      { id: "applications:all", label: "All applications" },
+      { id: "applications:pending", label: "Pending review" },
+      { id: "applications:approved", label: "Approved" },
+      { id: "applications:rejected", label: "Rejected" },
+    ]},
+    { id: "citizens:all", label: "Citizens", icon: Users, children: [
+      { id: "citizens:all", label: "All users" },
+      { id: "citizens:active", label: "Active users" },
+      { id: "citizens:suspended", label: "Suspended users" },
+    ]},
+    { id: "vehicles:all", label: "Vehicles", icon: Car, children: [
+      { id: "vehicles:all", label: "Registered vehicles" },
+      { id: "vehicles:verification", label: "Vehicle verification" },
+    ]},
+    { id: "fines:outstanding", label: "Fines", icon: Ticket, children: [
+      { id: "fines:outstanding", label: "Outstanding fines" },
+      { id: "fines:payments", label: "Payments" },
+      { id: "fines:history", label: "Fine history" },
+    ]},
   ]},
-  { heading: "Account", items: [{ id: "security", label: "Security", icon: ShieldCheck }] },
+  { heading: "System", items: [
+    { id: "appointments:upcoming", label: "Appointments", icon: Clock3, children: [
+      { id: "appointments:upcoming", label: "Upcoming appointments" },
+      { id: "appointments:completed", label: "Completed appointments" },
+    ]},
+    { id: "documents:all", label: "Documents", icon: FileText, children: [
+      { id: "documents:all", label: "Submitted documents" },
+      { id: "documents:verification", label: "Verification" },
+    ]},
+    { id: "notifications", label: "Notifications", icon: Bell },
+  ]},
+  { heading: "Security", items: [
+    { id: "security:audit", label: "Security & audit", icon: ShieldCheck, children: [
+      { id: "security:audit", label: "Audit logs" },
+      { id: "security:login", label: "Login activity" },
+      { id: "security:events", label: "Security events" },
+    ]},
+  ]},
+  { heading: "Account", items: [
+    { id: "admin:profile", label: "Administrator profile", icon: User },
+    { id: "security", label: "Account security", icon: Lock },
+  ]},
 ];
+
 
 function Dashboard() {
   const navigate = useNavigate();
