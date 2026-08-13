@@ -417,7 +417,18 @@ function Dashboard() {
           {status === "error" ? <ErrorState message="We couldn't load your traffic services. Please check your connection and try again." onRetry={() => void loadData()} /> : null}
           {status === "ready" ? (
             isAdmin ? (
-              <AdminViews section={section} users={users} bookings={bookings} vehicles={vehicles} fines={fines} onUpdate={updateBooking} email={user.email ?? ""} onPasswordReset={resetPassword} onSignOutEverywhere={() => void signOut("global")} />
+              <AdminViews
+                section={section}
+                data={{ users, bookings, vehicles, fines, role: adminRole }}
+                handlers={{ onNavigate: go, onDecision: updateBooking, onVehicleDecision: updateVehicle }}
+                notices={notices}
+                readIds={readIds}
+                onRead={(id: string) => persistRead(Array.from(new Set([...readIds, id])))}
+                onReadAll={() => persistRead(notices.map((notice) => notice.id))}
+                email={user.email ?? ""}
+                onPasswordReset={resetPassword}
+                onSignOutEverywhere={() => void signOut("global")}
+              />
             ) : (
               <>
                 {section === "overview" && <CitizenOverview profile={profile} bookings={bookings} vehicles={vehicles} fines={fines} notices={notices} readIds={readIds} onNavigate={go} />}
