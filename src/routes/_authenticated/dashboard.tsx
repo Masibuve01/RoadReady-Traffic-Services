@@ -265,23 +265,56 @@ function Dashboard() {
         <div key={group.heading}>
           <p className="px-3 pb-2 text-[11px] font-bold uppercase tracking-wider text-primary-foreground/50">{group.heading}</p>
           <ul className="grid gap-1">
-            {group.items.map(({ id, label, icon: Icon }) => (
-              <li key={id}>
-                <button
-                  type="button"
-                  onClick={() => go(id)}
-                  aria-current={section === id ? "page" : undefined}
-                  className={cn(
-                    "flex min-h-11 w-full items-center gap-3 rounded-md px-3 text-sm font-medium text-primary-foreground/80 transition-colors hover:bg-primary-foreground/10 hover:text-primary-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-warning",
-                    section === id && "bg-primary-foreground/15 text-primary-foreground",
-                  )}
-                >
-                  <Icon aria-hidden="true" className="size-4 shrink-0" />
-                  <span className="truncate">{label}</span>
-                  {id === "notifications" && unread ? <span className="ml-auto rounded-full bg-warning px-2 py-0.5 text-[10px] font-bold text-road">{unread}</span> : null}
-                </button>
-              </li>
-            ))}
+            {group.items.map(({ id, label, icon: Icon, children }) => {
+              const groupKey = id.split(":")[0];
+              const active = section === id || (children ? section.split(":")[0] === groupKey : false);
+              const expanded = Boolean(children) && (section.split(":")[0] === groupKey || openGroups.includes(groupKey!));
+              return (
+                <li key={id}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (children) {
+                        setOpenGroups((current) => (current.includes(groupKey!) ? current.filter((value) => value !== groupKey) : [...current, groupKey!]));
+                        go(children[0]!.id);
+                      } else {
+                        go(id);
+                      }
+                    }}
+                    aria-current={section === id ? "page" : undefined}
+                    aria-expanded={children ? expanded : undefined}
+                    className={cn(
+                      "flex min-h-11 w-full items-center gap-3 rounded-md px-3 text-sm font-medium text-primary-foreground/80 transition-colors hover:bg-primary-foreground/10 hover:text-primary-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-warning",
+                      active && "bg-primary-foreground/15 text-primary-foreground",
+                    )}
+                  >
+                    <Icon aria-hidden="true" className="size-4 shrink-0" />
+                    <span className="truncate">{label}</span>
+                    {id === "notifications" && unread ? <span className="ml-auto rounded-full bg-warning px-2 py-0.5 text-[10px] font-bold text-road">{unread}</span> : null}
+                    {children ? <ChevronDown aria-hidden="true" className={cn("ml-auto size-4 transition-transform", expanded && "rotate-180")} /> : null}
+                  </button>
+                  {children && expanded ? (
+                    <ul className="mt-1 grid gap-0.5 border-l border-primary-foreground/20 pl-3">
+                      {children.map((child) => (
+                        <li key={child.id}>
+                          <button
+                            type="button"
+                            onClick={() => go(child.id)}
+                            aria-current={section === child.id ? "page" : undefined}
+                            className={cn(
+                              "flex min-h-9 w-full items-center rounded-md px-3 text-left text-sm text-primary-foreground/70 hover:bg-primary-foreground/10 hover:text-primary-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-warning",
+                              section === child.id && "bg-primary-foreground/10 font-semibold text-primary-foreground",
+                            )}
+                          >
+                            {child.label}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </li>
+              );
+            })}
           </ul>
         </div>
       ))}
@@ -290,6 +323,7 @@ function Dashboard() {
       </Button>
     </nav>
   );
+
 
   return (
     <div className="min-h-dvh bg-muted/40 lg:grid lg:grid-cols-[260px_1fr]">
