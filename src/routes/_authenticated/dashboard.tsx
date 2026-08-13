@@ -253,6 +253,7 @@ function Dashboard() {
   }
 
   const groups = isAdmin ? adminNav : citizenNav;
+  const adminRole: AdminRole = "super";
   const displayName = profile?.full_name ?? user.email ?? "Citizen";
 
   function go(target: string) {
