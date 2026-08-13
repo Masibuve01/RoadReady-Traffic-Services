@@ -462,112 +462,41 @@ function Dashboard() {
 
 function AdminViews({
   section,
-  users,
-  bookings,
-  vehicles,
-  fines,
-  onUpdate,
+  data,
+  handlers,
+  notices,
+  readIds,
+  onRead,
+  onReadAll,
   email,
   onPasswordReset,
   onSignOutEverywhere,
 }: {
   section: string;
-  users: Profile[];
-  bookings: Booking[];
-  vehicles: Vehicle[];
-  fines: Fine[];
-  onUpdate: (id: string, status: "approved" | "rejected" | "passed" | "failed") => void;
+  data: React.ComponentProps<typeof AdminOverview>["data"];
+  handlers: React.ComponentProps<typeof AdminOverview>["handlers"];
+  notices: ReturnType<typeof deriveNotices>;
+  readIds: string[];
+  onRead: (id: string) => void;
+  onReadAll: () => void;
   email: string;
   onPasswordReset: () => void;
   onSignOutEverywhere: () => void;
 }) {
-  const pending = bookings.filter((booking) => booking.status === "pending");
+  const [group, sub = "all"] = section.split(":");
+
   if (section === "security") return <SecuritySection email={email} onPasswordReset={onPasswordReset} onSignOutEverywhere={onSignOutEverywhere} />;
-
-  if (section === "users") {
-    return (
-      <div className="space-y-6">
-        <SectionHeader title="All registered users" description="Every citizen account in the system. Identity numbers are masked." />
-        <DataTable
-          caption="Registered users"
-          headers={["Full name", "Email", "Identity number", "Learner licence", "Driver licence"]}
-          rows={users.map((person) => [person.full_name, person.email, maskIdentifier(person.id_number), person.learners_number ?? "Not recorded", person.drivers_number ?? "Not recorded"])}
-        />
-      </div>
-    );
+  if (section === "admin:profile") return <AdminSettings role={data.role} email={email} />;
+  if (section === "notifications") {
+    return <NotificationsSection notices={notices} readIds={readIds} onRead={onRead} onReadAll={onReadAll} onNavigate={handlers.onNavigate} />;
   }
+  if (group === "applications") return <AdminApplications data={data} handlers={handlers} filter={sub} />;
+  if (group === "citizens") return <AdminCitizens data={data} handlers={handlers} filter={sub} />;
+  if (group === "vehicles") return <AdminVehicles data={data} handlers={handlers} filter={sub} />;
+  if (group === "fines") return <AdminFines data={data} filter={sub} />;
+  if (group === "appointments") return <AdminAppointments data={data} filter={sub} />;
+  if (group === "documents") return <AdminDocuments data={data} filter={sub} />;
+  if (group === "security") return <AdminSecurity data={data} filter={sub} />;
 
-  if (section === "approvals") {
-    return (
-      <div className="space-y-6">
-        <SectionHeader title="Booking approvals" description="Review citizen requests and record outcomes." />
-        <DataTable
-          caption="Booking approvals"
-          headers={["Applicant", "Service", "Department", "Preferred date", "Status", "Actions"]}
-          rows={bookings.map((booking) => [
-            users.find((person) => person.id === booking.user_id)?.full_name ?? "Citizen",
-            serviceLabel[booking.booking_type] ?? booking.booking_type,
-            booking.traffic_department,
-            formatDate(booking.preferred_date),
-            <StatusBadge key={`${booking.id}-status`} value={booking.status} />,
-            <div key={`${booking.id}-actions`} className="flex flex-wrap gap-1">
-              <Button size="sm" onClick={() => onUpdate(booking.id, "approved")}>Approve</Button>
-              <Button size="sm" variant="outline" onClick={() => onUpdate(booking.id, "rejected")}>Reject</Button>
-              <Button size="sm" variant="secondary" onClick={() => onUpdate(booking.id, "passed")}>Pass</Button>
-              <Button size="sm" variant="ghost" onClick={() => onUpdate(booking.id, "failed")}>Fail</Button>
-            </div>,
-          ])}
-        />
-      </div>
-    );
-  }
-
-  if (section === "admin-vehicles") {
-    return (
-      <div className="space-y-6">
-        <SectionHeader title="Registered vehicles" description="Vehicles submitted by citizens and their verification status." />
-        <DataTable
-          caption="Registered vehicles"
-          headers={["Number plate", "Vehicle", "Registered", "Status"]}
-          rows={vehicles.map((vehicle) => [vehicle.number_plate, `${vehicle.make} ${vehicle.model}`, formatDate(vehicle.created_at), <StatusBadge key={vehicle.id} value={vehicle.registration_status} />])}
-        />
-      </div>
-    );
-  }
-
-  const stats = [
-    { label: "Registered users", value: users.length, icon: Users },
-    { label: "Pending approvals", value: pending.length, icon: Clock3 },
-    { label: "Registered vehicles", value: vehicles.length, icon: Car },
-    { label: "Unpaid fines", value: fines.filter((fine) => fine.payment_status === "unpaid").length, icon: Ticket },
-  ];
-
-  return (
-    <div className="space-y-8">
-      <SectionHeader title="System overview" description="Monitor activity and process citizen requests." />
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {stats.map(({ label, value, icon: Icon }) => (
-          <Panel key={label}>
-            <Icon aria-hidden="true" className="size-5 text-primary" />
-            <p className="mt-6 text-sm text-muted-foreground">{label}</p>
-            <p className="mt-1 text-3xl font-black tabular-nums">{value}</p>
-          </Panel>
-        ))}
-      </div>
-      <section>
-        <h2 className="mb-3 text-lg font-bold">Latest applications</h2>
-        <DataTable
-          caption="Latest applications"
-          headers={["Applicant", "Service", "Department", "Preferred date", "Status"]}
-          rows={bookings.slice(0, 8).map((booking) => [
-            users.find((person) => person.id === booking.user_id)?.full_name ?? "Citizen",
-            serviceLabel[booking.booking_type] ?? booking.booking_type,
-            booking.traffic_department,
-            formatDate(booking.preferred_date),
-            <StatusBadge key={booking.id} value={booking.status} />,
-          ])}
-        />
-      </section>
-    </div>
-  );
+  return <AdminOverview data={data} handlers={handlers} />;
 }
