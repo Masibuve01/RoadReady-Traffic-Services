@@ -18,6 +18,7 @@ import {
   Users,
   Wrench,
   X,
+  ChevronDown,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
