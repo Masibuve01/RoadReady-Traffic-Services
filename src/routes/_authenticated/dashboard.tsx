@@ -162,9 +162,9 @@ function Dashboard() {
       setIsAdmin(admin);
 
       const [bookingResult, vehicleResult, fineResult, usersResult] = await Promise.all([
-        supabase.from("bookings").select("id,user_id,booking_type,preferred_date,traffic_department,status,appointment_date,created_at,updated_at").order("created_at", { ascending: false }),
-        supabase.from("vehicles").select("id,number_plate,make,model,manufacture_year,color,registration_status,created_at,updated_at").order("created_at", { ascending: false }),
-        supabase.from("fines").select("id,reference_number,offence,offence_date,location,amount,due_date,payment_status,created_at").order("created_at", { ascending: false }),
+        supabase.from("bookings").select("id,user_id,booking_type,preferred_date,traffic_department,status,appointment_date,admin_notes,created_at,updated_at").order("created_at", { ascending: false }),
+        supabase.from("vehicles").select("id,user_id,number_plate,vin,make,model,manufacture_year,color,registration_status,admin_notes,document_reference,created_at,updated_at").order("created_at", { ascending: false }),
+        supabase.from("fines").select("id,user_id,vehicle_id,reference_number,offence,offence_date,location,amount,due_date,payment_status,created_at").order("created_at", { ascending: false }),
         admin
           ? supabase.from("profiles").select("id,email,full_name,id_number,phone,learners_number,learners_expiry,drivers_number,drivers_expiry").order("created_at", { ascending: false })
           : Promise.resolve({ data: [], error: null }),
