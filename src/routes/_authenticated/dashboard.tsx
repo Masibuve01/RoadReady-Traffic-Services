@@ -222,11 +222,22 @@ function Dashboard() {
     else toast.success(`Payment of R ${Number(fine.amount).toFixed(2)} recorded as pending with the secure traffic services channel.`);
   }
 
-  async function updateBooking(id: string, next: "approved" | "rejected" | "passed" | "failed") {
-    const { error } = await supabase.from("bookings").update({ status: next }).eq("id", id);
-    if (error) toast.error(error.message);
-    else { toast.success(`Booking marked ${next}`); await loadData(); }
+  async function updateBooking(id: string, next: "approved" | "rejected" | "passed" | "failed", note?: string) {
+    const payload: { status: typeof next; admin_notes?: string } = { status: next };
+    if (note) payload.admin_notes = note;
+    const { error } = await supabase.from("bookings").update(payload).eq("id", id);
+    if (error) toast.error("We couldn't update this application. Please try again.");
+    else { toast.success(`Application marked ${next}`); await loadData(); }
   }
+
+  async function updateVehicle(id: string, next: "verified" | "rejected", note?: string) {
+    const payload: { registration_status: typeof next; admin_notes?: string } = { registration_status: next };
+    if (note) payload.admin_notes = note;
+    const { error } = await supabase.from("vehicles").update(payload).eq("id", id);
+    if (error) toast.error("We couldn't update this vehicle. Please try again.");
+    else { toast.success(`Vehicle ${next}`); await loadData(); }
+  }
+
 
   async function resetPassword() {
     const { error } = await supabase.auth.resetPasswordForEmail(user.email ?? "", { redirectTo: `${window.location.origin}/auth` });
