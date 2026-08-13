@@ -349,15 +349,19 @@ function Dashboard() {
               <Menu aria-hidden="true" />
             </Button>
             <div className="min-w-0">
-              <h1 className="truncate text-base font-bold sm:text-lg">Welcome back, {displayName}</h1>
+              <h1 className="truncate text-base font-bold sm:text-lg">{isAdmin ? `${greeting()}, ${displayName}` : `Welcome back, ${displayName}`}</h1>
               <p className="hidden truncate text-sm text-muted-foreground sm:block">
-                {isAdmin ? "Monitor citizen activity and process traffic service requests." : "Manage your traffic services, vehicles, applications and fines from one secure portal."}
+                {isAdmin ? "Monitor citizen activity and manage traffic service requests securely." : "Manage your traffic services, vehicles, applications and fines from one secure portal."}
               </p>
             </div>
             <div className="flex items-center gap-1">
               <span className="mr-1 hidden items-center gap-1.5 rounded-full border border-success/40 bg-success/10 px-2.5 py-1 text-xs font-semibold text-success md:inline-flex">
                 <Lock aria-hidden="true" className="size-3" /> Secure session
               </span>
+              {isAdmin ? <AdminSearch data={{ users, bookings, vehicles, fines, role: adminRole }} onNavigate={go} /> : null}
+              {isAdmin ? (
+                <Button variant="ghost" size="icon" className="min-h-11 min-w-11" aria-label="Help and support" onClick={() => go("admin:profile")}><HelpCircle aria-hidden="true" /></Button>
+              ) : null}
               <Button variant="ghost" size="icon" className="relative min-h-11 min-w-11" onClick={() => go("notifications")} aria-label={`Notifications${unread ? `, ${unread} unread` : ""}`}>
                 <Bell aria-hidden="true" />
                 {unread ? <span className="absolute right-1.5 top-1.5 min-w-4 rounded-full bg-destructive px-1 text-[10px] font-bold leading-4 text-destructive-foreground">{unread}</span> : null}
