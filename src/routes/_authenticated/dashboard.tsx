@@ -18,6 +18,7 @@ import {
   Users,
   Wrench,
   X,
+  ChevronDown,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -38,7 +39,16 @@ import {
 } from "@/components/dashboard/citizen";
 import { TrafficAssistant } from "@/components/dashboard/traffic-assistant";
 import { deriveNotices, formatDate, maskIdentifier, serviceLabel, type Booking, type Fine, type Profile, type Vehicle } from "@/lib/dashboard-utils";
+import { AdminAppointments, AdminApplications, AdminCitizens, AdminDocuments, AdminFines, AdminOverview, AdminSearch, AdminSecurity, AdminSettings, AdminVehicles } from "@/components/dashboard/admin";
+import type { AdminRole } from "@/lib/admin-utils";
 import { cn } from "@/lib/utils";
+
+function greeting() {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  return "Good evening";
+}
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({ meta: [
@@ -52,7 +62,7 @@ export const Route = createFileRoute("/_authenticated/dashboard")({
   component: Dashboard,
 });
 
-type NavItem = { id: string; label: string; icon: typeof LayoutDashboard };
+type NavItem = { id: string; label: string; icon: typeof LayoutDashboard; children?: { id: string; label: string }[] };
 type NavGroup = { heading: string; items: NavItem[] };
 
 const citizenNav: NavGroup[] = [
@@ -75,12 +85,51 @@ const citizenNav: NavGroup[] = [
 const adminNav: NavGroup[] = [
   { heading: "Administration", items: [
     { id: "overview", label: "Overview", icon: LayoutDashboard },
-    { id: "users", label: "All users", icon: Users },
-    { id: "approvals", label: "Approvals", icon: FileCheck2 },
-    { id: "admin-vehicles", label: "Vehicles", icon: Car },
+    { id: "applications:all", label: "Applications", icon: ClipboardList, children: [
+      { id: "applications:all", label: "All applications" },
+      { id: "applications:pending", label: "Pending review" },
+      { id: "applications:approved", label: "Approved" },
+      { id: "applications:rejected", label: "Rejected" },
+    ]},
+    { id: "citizens:all", label: "Citizens", icon: Users, children: [
+      { id: "citizens:all", label: "All users" },
+      { id: "citizens:active", label: "Active users" },
+      { id: "citizens:suspended", label: "Suspended users" },
+    ]},
+    { id: "vehicles:all", label: "Vehicles", icon: Car, children: [
+      { id: "vehicles:all", label: "Registered vehicles" },
+      { id: "vehicles:verification", label: "Vehicle verification" },
+    ]},
+    { id: "fines:outstanding", label: "Fines", icon: Ticket, children: [
+      { id: "fines:outstanding", label: "Outstanding fines" },
+      { id: "fines:payments", label: "Payments" },
+      { id: "fines:history", label: "Fine history" },
+    ]},
   ]},
-  { heading: "Account", items: [{ id: "security", label: "Security", icon: ShieldCheck }] },
+  { heading: "System", items: [
+    { id: "appointments:upcoming", label: "Appointments", icon: Clock3, children: [
+      { id: "appointments:upcoming", label: "Upcoming appointments" },
+      { id: "appointments:completed", label: "Completed appointments" },
+    ]},
+    { id: "documents:all", label: "Documents", icon: FileText, children: [
+      { id: "documents:all", label: "Submitted documents" },
+      { id: "documents:verification", label: "Verification" },
+    ]},
+    { id: "notifications", label: "Notifications", icon: Bell },
+  ]},
+  { heading: "Security", items: [
+    { id: "security:audit", label: "Security & audit", icon: ShieldCheck, children: [
+      { id: "security:audit", label: "Audit logs" },
+      { id: "security:login", label: "Login activity" },
+      { id: "security:events", label: "Security events" },
+    ]},
+  ]},
+  { heading: "Account", items: [
+    { id: "admin:profile", label: "Administrator profile", icon: User },
+    { id: "security", label: "Account security", icon: Lock },
+  ]},
 ];
+
 
 function Dashboard() {
   const navigate = useNavigate();
@@ -94,6 +143,7 @@ function Dashboard() {
   const [section, setSection] = useState("overview");
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [openGroups, setOpenGroups] = useState<string[]>([]);
   const [readIds, setReadIds] = useState<string[]>([]);
 
   const storageKey = `roadready:read-notices:${user.id}`;
@@ -123,9 +173,9 @@ function Dashboard() {
       setIsAdmin(admin);
 
       const [bookingResult, vehicleResult, fineResult, usersResult] = await Promise.all([
-        supabase.from("bookings").select("id,user_id,booking_type,preferred_date,traffic_department,status,appointment_date,created_at,updated_at").order("created_at", { ascending: false }),
-        supabase.from("vehicles").select("id,number_plate,make,model,manufacture_year,color,registration_status,created_at,updated_at").order("created_at", { ascending: false }),
-        supabase.from("fines").select("id,reference_number,offence,offence_date,location,amount,due_date,payment_status,created_at").order("created_at", { ascending: false }),
+        supabase.from("bookings").select("id,user_id,booking_type,preferred_date,traffic_department,status,appointment_date,admin_notes,created_at,updated_at").order("created_at", { ascending: false }),
+        supabase.from("vehicles").select("id,user_id,number_plate,vin,make,model,manufacture_year,color,registration_status,admin_notes,document_reference,created_at,updated_at").order("created_at", { ascending: false }),
+        supabase.from("fines").select("id,user_id,vehicle_id,reference_number,offence,offence_date,location,amount,due_date,payment_status,created_at").order("created_at", { ascending: false }),
         admin
           ? supabase.from("profiles").select("id,email,full_name,id_number,phone,learners_number,learners_expiry,drivers_number,drivers_expiry").order("created_at", { ascending: false })
           : Promise.resolve({ data: [], error: null }),
@@ -183,11 +233,22 @@ function Dashboard() {
     else toast.success(`Payment of R ${Number(fine.amount).toFixed(2)} recorded as pending with the secure traffic services channel.`);
   }
 
-  async function updateBooking(id: string, next: "approved" | "rejected" | "passed" | "failed") {
-    const { error } = await supabase.from("bookings").update({ status: next }).eq("id", id);
-    if (error) toast.error(error.message);
-    else { toast.success(`Booking marked ${next}`); await loadData(); }
+  async function updateBooking(id: string, next: "approved" | "rejected" | "passed" | "failed", note?: string) {
+    const payload: { status: typeof next; admin_notes?: string } = { status: next };
+    if (note) payload.admin_notes = note;
+    const { error } = await supabase.from("bookings").update(payload).eq("id", id);
+    if (error) toast.error("We couldn't update this application. Please try again.");
+    else { toast.success(`Application marked ${next}`); await loadData(); }
   }
+
+  async function updateVehicle(id: string, next: "verified" | "rejected", note?: string) {
+    const payload: { registration_status: typeof next; admin_notes?: string } = { registration_status: next };
+    if (note) payload.admin_notes = note;
+    const { error } = await supabase.from("vehicles").update(payload).eq("id", id);
+    if (error) toast.error("We couldn't update this vehicle. Please try again.");
+    else { toast.success(`Vehicle ${next}`); await loadData(); }
+  }
+
 
   async function resetPassword() {
     const { error } = await supabase.auth.resetPasswordForEmail(user.email ?? "", { redirectTo: `${window.location.origin}/auth` });
@@ -201,6 +262,7 @@ function Dashboard() {
   }
 
   const groups = isAdmin ? adminNav : citizenNav;
+  const adminRole: AdminRole = "super";
   const displayName = profile?.full_name ?? user.email ?? "Citizen";
 
   function go(target: string) {
@@ -215,23 +277,56 @@ function Dashboard() {
         <div key={group.heading}>
           <p className="px-3 pb-2 text-[11px] font-bold uppercase tracking-wider text-primary-foreground/50">{group.heading}</p>
           <ul className="grid gap-1">
-            {group.items.map(({ id, label, icon: Icon }) => (
-              <li key={id}>
-                <button
-                  type="button"
-                  onClick={() => go(id)}
-                  aria-current={section === id ? "page" : undefined}
-                  className={cn(
-                    "flex min-h-11 w-full items-center gap-3 rounded-md px-3 text-sm font-medium text-primary-foreground/80 transition-colors hover:bg-primary-foreground/10 hover:text-primary-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-warning",
-                    section === id && "bg-primary-foreground/15 text-primary-foreground",
-                  )}
-                >
-                  <Icon aria-hidden="true" className="size-4 shrink-0" />
-                  <span className="truncate">{label}</span>
-                  {id === "notifications" && unread ? <span className="ml-auto rounded-full bg-warning px-2 py-0.5 text-[10px] font-bold text-road">{unread}</span> : null}
-                </button>
-              </li>
-            ))}
+            {group.items.map(({ id, label, icon: Icon, children }) => {
+              const groupKey = id.split(":")[0];
+              const active = section === id || (children ? section.split(":")[0] === groupKey : false);
+              const expanded = Boolean(children) && (section.split(":")[0] === groupKey || openGroups.includes(groupKey!));
+              return (
+                <li key={id}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (children) {
+                        setOpenGroups((current) => (current.includes(groupKey!) ? current.filter((value) => value !== groupKey) : [...current, groupKey!]));
+                        go(children[0]!.id);
+                      } else {
+                        go(id);
+                      }
+                    }}
+                    aria-current={section === id ? "page" : undefined}
+                    aria-expanded={children ? expanded : undefined}
+                    className={cn(
+                      "flex min-h-11 w-full items-center gap-3 rounded-md px-3 text-sm font-medium text-primary-foreground/80 transition-colors hover:bg-primary-foreground/10 hover:text-primary-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-warning",
+                      active && "bg-primary-foreground/15 text-primary-foreground",
+                    )}
+                  >
+                    <Icon aria-hidden="true" className="size-4 shrink-0" />
+                    <span className="truncate">{label}</span>
+                    {id === "notifications" && unread ? <span className="ml-auto rounded-full bg-warning px-2 py-0.5 text-[10px] font-bold text-road">{unread}</span> : null}
+                    {children ? <ChevronDown aria-hidden="true" className={cn("ml-auto size-4 transition-transform", expanded && "rotate-180")} /> : null}
+                  </button>
+                  {children && expanded ? (
+                    <ul className="mt-1 grid gap-0.5 border-l border-primary-foreground/20 pl-3">
+                      {children.map((child) => (
+                        <li key={child.id}>
+                          <button
+                            type="button"
+                            onClick={() => go(child.id)}
+                            aria-current={section === child.id ? "page" : undefined}
+                            className={cn(
+                              "flex min-h-9 w-full items-center rounded-md px-3 text-left text-sm text-primary-foreground/70 hover:bg-primary-foreground/10 hover:text-primary-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-warning",
+                              section === child.id && "bg-primary-foreground/10 font-semibold text-primary-foreground",
+                            )}
+                          >
+                            {child.label}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </li>
+              );
+            })}
           </ul>
         </div>
       ))}
@@ -240,6 +335,7 @@ function Dashboard() {
       </Button>
     </nav>
   );
+
 
   return (
     <div className="min-h-dvh bg-muted/40 lg:grid lg:grid-cols-[260px_1fr]">
@@ -263,15 +359,19 @@ function Dashboard() {
               <Menu aria-hidden="true" />
             </Button>
             <div className="min-w-0">
-              <h1 className="truncate text-base font-bold sm:text-lg">Welcome back, {displayName}</h1>
+              <h1 className="truncate text-base font-bold sm:text-lg">{isAdmin ? `${greeting()}, ${displayName}` : `Welcome back, ${displayName}`}</h1>
               <p className="hidden truncate text-sm text-muted-foreground sm:block">
-                {isAdmin ? "Monitor citizen activity and process traffic service requests." : "Manage your traffic services, vehicles, applications and fines from one secure portal."}
+                {isAdmin ? "Monitor citizen activity and manage traffic service requests securely." : "Manage your traffic services, vehicles, applications and fines from one secure portal."}
               </p>
             </div>
             <div className="flex items-center gap-1">
               <span className="mr-1 hidden items-center gap-1.5 rounded-full border border-success/40 bg-success/10 px-2.5 py-1 text-xs font-semibold text-success md:inline-flex">
                 <Lock aria-hidden="true" className="size-3" /> Secure session
               </span>
+              {isAdmin ? <AdminSearch data={{ users, bookings, vehicles, fines, role: adminRole }} onNavigate={go} /> : null}
+              {isAdmin ? (
+                <Button variant="ghost" size="icon" className="min-h-11 min-w-11" aria-label="Help and support" onClick={() => go("admin:profile")}><HelpCircle aria-hidden="true" /></Button>
+              ) : null}
               <Button variant="ghost" size="icon" className="relative min-h-11 min-w-11" onClick={() => go("notifications")} aria-label={`Notifications${unread ? `, ${unread} unread` : ""}`}>
                 <Bell aria-hidden="true" />
                 {unread ? <span className="absolute right-1.5 top-1.5 min-w-4 rounded-full bg-destructive px-1 text-[10px] font-bold leading-4 text-destructive-foreground">{unread}</span> : null}
@@ -317,7 +417,18 @@ function Dashboard() {
           {status === "error" ? <ErrorState message="We couldn't load your traffic services. Please check your connection and try again." onRetry={() => void loadData()} /> : null}
           {status === "ready" ? (
             isAdmin ? (
-              <AdminViews section={section} users={users} bookings={bookings} vehicles={vehicles} fines={fines} onUpdate={updateBooking} email={user.email ?? ""} onPasswordReset={resetPassword} onSignOutEverywhere={() => void signOut("global")} />
+              <AdminViews
+                section={section}
+                data={{ users, bookings, vehicles, fines, role: adminRole }}
+                handlers={{ onNavigate: go, onDecision: updateBooking, onVehicleDecision: updateVehicle }}
+                notices={notices}
+                readIds={readIds}
+                onRead={(id: string) => persistRead(Array.from(new Set([...readIds, id])))}
+                onReadAll={() => persistRead(notices.map((notice) => notice.id))}
+                email={user.email ?? ""}
+                onPasswordReset={resetPassword}
+                onSignOutEverywhere={() => void signOut("global")}
+              />
             ) : (
               <>
                 {section === "overview" && <CitizenOverview profile={profile} bookings={bookings} vehicles={vehicles} fines={fines} notices={notices} readIds={readIds} onNavigate={go} />}
@@ -351,112 +462,41 @@ function Dashboard() {
 
 function AdminViews({
   section,
-  users,
-  bookings,
-  vehicles,
-  fines,
-  onUpdate,
+  data,
+  handlers,
+  notices,
+  readIds,
+  onRead,
+  onReadAll,
   email,
   onPasswordReset,
   onSignOutEverywhere,
 }: {
   section: string;
-  users: Profile[];
-  bookings: Booking[];
-  vehicles: Vehicle[];
-  fines: Fine[];
-  onUpdate: (id: string, status: "approved" | "rejected" | "passed" | "failed") => void;
+  data: React.ComponentProps<typeof AdminOverview>["data"];
+  handlers: React.ComponentProps<typeof AdminOverview>["handlers"];
+  notices: ReturnType<typeof deriveNotices>;
+  readIds: string[];
+  onRead: (id: string) => void;
+  onReadAll: () => void;
   email: string;
   onPasswordReset: () => void;
   onSignOutEverywhere: () => void;
 }) {
-  const pending = bookings.filter((booking) => booking.status === "pending");
+  const [group, sub = "all"] = section.split(":");
+
   if (section === "security") return <SecuritySection email={email} onPasswordReset={onPasswordReset} onSignOutEverywhere={onSignOutEverywhere} />;
-
-  if (section === "users") {
-    return (
-      <div className="space-y-6">
-        <SectionHeader title="All registered users" description="Every citizen account in the system. Identity numbers are masked." />
-        <DataTable
-          caption="Registered users"
-          headers={["Full name", "Email", "Identity number", "Learner licence", "Driver licence"]}
-          rows={users.map((person) => [person.full_name, person.email, maskIdentifier(person.id_number), person.learners_number ?? "Not recorded", person.drivers_number ?? "Not recorded"])}
-        />
-      </div>
-    );
+  if (section === "admin:profile") return <AdminSettings role={data.role} email={email} />;
+  if (section === "notifications") {
+    return <NotificationsSection notices={notices} readIds={readIds} onRead={onRead} onReadAll={onReadAll} onNavigate={handlers.onNavigate} />;
   }
+  if (group === "applications") return <AdminApplications data={data} handlers={handlers} filter={sub} />;
+  if (group === "citizens") return <AdminCitizens data={data} handlers={handlers} filter={sub} />;
+  if (group === "vehicles") return <AdminVehicles data={data} handlers={handlers} filter={sub} />;
+  if (group === "fines") return <AdminFines data={data} filter={sub} />;
+  if (group === "appointments") return <AdminAppointments data={data} filter={sub} />;
+  if (group === "documents") return <AdminDocuments data={data} filter={sub} />;
+  if (group === "security") return <AdminSecurity data={data} filter={sub} />;
 
-  if (section === "approvals") {
-    return (
-      <div className="space-y-6">
-        <SectionHeader title="Booking approvals" description="Review citizen requests and record outcomes." />
-        <DataTable
-          caption="Booking approvals"
-          headers={["Applicant", "Service", "Department", "Preferred date", "Status", "Actions"]}
-          rows={bookings.map((booking) => [
-            users.find((person) => person.id === booking.user_id)?.full_name ?? "Citizen",
-            serviceLabel[booking.booking_type] ?? booking.booking_type,
-            booking.traffic_department,
-            formatDate(booking.preferred_date),
-            <StatusBadge key={`${booking.id}-status`} value={booking.status} />,
-            <div key={`${booking.id}-actions`} className="flex flex-wrap gap-1">
-              <Button size="sm" onClick={() => onUpdate(booking.id, "approved")}>Approve</Button>
-              <Button size="sm" variant="outline" onClick={() => onUpdate(booking.id, "rejected")}>Reject</Button>
-              <Button size="sm" variant="secondary" onClick={() => onUpdate(booking.id, "passed")}>Pass</Button>
-              <Button size="sm" variant="ghost" onClick={() => onUpdate(booking.id, "failed")}>Fail</Button>
-            </div>,
-          ])}
-        />
-      </div>
-    );
-  }
-
-  if (section === "admin-vehicles") {
-    return (
-      <div className="space-y-6">
-        <SectionHeader title="Registered vehicles" description="Vehicles submitted by citizens and their verification status." />
-        <DataTable
-          caption="Registered vehicles"
-          headers={["Number plate", "Vehicle", "Registered", "Status"]}
-          rows={vehicles.map((vehicle) => [vehicle.number_plate, `${vehicle.make} ${vehicle.model}`, formatDate(vehicle.created_at), <StatusBadge key={vehicle.id} value={vehicle.registration_status} />])}
-        />
-      </div>
-    );
-  }
-
-  const stats = [
-    { label: "Registered users", value: users.length, icon: Users },
-    { label: "Pending approvals", value: pending.length, icon: Clock3 },
-    { label: "Registered vehicles", value: vehicles.length, icon: Car },
-    { label: "Unpaid fines", value: fines.filter((fine) => fine.payment_status === "unpaid").length, icon: Ticket },
-  ];
-
-  return (
-    <div className="space-y-8">
-      <SectionHeader title="System overview" description="Monitor activity and process citizen requests." />
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {stats.map(({ label, value, icon: Icon }) => (
-          <Panel key={label}>
-            <Icon aria-hidden="true" className="size-5 text-primary" />
-            <p className="mt-6 text-sm text-muted-foreground">{label}</p>
-            <p className="mt-1 text-3xl font-black tabular-nums">{value}</p>
-          </Panel>
-        ))}
-      </div>
-      <section>
-        <h2 className="mb-3 text-lg font-bold">Latest applications</h2>
-        <DataTable
-          caption="Latest applications"
-          headers={["Applicant", "Service", "Department", "Preferred date", "Status"]}
-          rows={bookings.slice(0, 8).map((booking) => [
-            users.find((person) => person.id === booking.user_id)?.full_name ?? "Citizen",
-            serviceLabel[booking.booking_type] ?? booking.booking_type,
-            booking.traffic_department,
-            formatDate(booking.preferred_date),
-            <StatusBadge key={booking.id} value={booking.status} />,
-          ])}
-        />
-      </section>
-    </div>
-  );
+  return <AdminOverview data={data} handlers={handlers} />;
 }
